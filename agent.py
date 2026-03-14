@@ -11,6 +11,7 @@ Output:
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -128,6 +129,99 @@ def list_files(path: str) -> str:
         return f"Error listing directory: {e}"
 
 
+def load_docker_env() -> dict[str, str]:
+    """Load environment variables from .env.docker.secret."""
+    env_file = PROJECT_ROOT / ".env.docker.secret"
+    env_vars: dict[str, str] = {}
+
+    if not env_file.exists():
+        print(
+            f"Warning: {env_file} not found, LMS_API_KEY not available", file=sys.stderr
+        )
+        return env_vars
+
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                env_vars[key.strip()] = value.strip()
+
+    return env_vars
+
+
+def get_api_base_url() -> str:
+    """Get the API base URL from environment or use default."""
+    return os.environ.get("AGENT_API_BASE_URL", "http://localhost:42002")
+
+
+def query_api(method: str, path: str, body: str | None = None) -> str:
+    """
+    Call the deployed backend API.
+
+    Args:
+        method: HTTP method (GET, POST, PUT, DELETE, PATCH).
+        path: API path (e.g., '/items/', '/analytics/completion-rate').
+        body: Optional JSON request body for POST/PUT/PATCH requests.
+
+    Returns:
+        JSON string with status_code and body, or error message.
+    """
+    import urllib.request
+    import urllib.error
+
+    api_base = get_api_base_url()
+    url = f"{api_base}{path}"
+
+    print(f"Querying API: {method} {url}", file=sys.stderr)
+
+    # Load LMS API key from docker env
+    docker_env = load_docker_env()
+    lms_api_key = docker_env.get("LMS_API_KEY", "")
+
+    if not lms_api_key:
+        return "Error: LMS_API_KEY not found in .env.docker.secret"
+
+    # Build headers
+    headers = {
+        "X-API-Key": lms_api_key,
+        "Content-Type": "application/json",
+    }
+
+    # Prepare request body
+    data = None
+    if body:
+        data = body.encode("utf-8")
+
+    # Build request
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            response_body = response.read().decode("utf-8")
+            status_code = response.status
+            result = {
+                "status_code": status_code,
+                "body": response_body,
+            }
+            return json.dumps(result)
+    except urllib.error.HTTPError as e:
+        # Handle HTTP errors (401, 404, 500, etc.)
+        error_body = e.read().decode("utf-8") if e.fp else ""
+        result = {
+            "status_code": e.code,
+            "body": error_body,
+            "error": f"HTTP {e.code}: {e.reason}",
+        }
+        return json.dumps(result)
+    except urllib.error.URLError as e:
+        return f"Error: Cannot reach API at {url} - {e.reason}"
+    except Exception as e:
+        return f"Error querying API: {e}"
+
+
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return tool definitions for the LLM function calling schema."""
     return [
@@ -165,6 +259,32 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_api",
+                "description": "Call the deployed backend API to get live data or check system behavior. Use this for questions about current database state, HTTP status codes, or API responses. The API requires X-API-Key authentication.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "description": "HTTP method (GET, POST, PUT, DELETE, PATCH)",
+                            "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "API path (e.g., '/items/', '/analytics/completion-rate')",
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "Optional JSON request body for POST/PUT/PATCH requests",
+                        },
+                    },
+                    "required": ["method", "path"],
+                },
+            },
+        },
     ]
 
 
@@ -187,30 +307,43 @@ def execute_tool(tool_name: str, args: dict[str, Any]) -> str:
     elif tool_name == "list_files":
         path = args.get("path", "")
         return list_files(path)
+    elif tool_name == "query_api":
+        method = args.get("method", "GET")
+        path = args.get("path", "")
+        body = args.get("body")
+        return query_api(method, path, body)
     else:
         return f"Error: Unknown tool '{tool_name}'"
 
 
 def get_system_prompt() -> str:
     """Return the system prompt for the documentation agent."""
-    return """You are a documentation assistant that answers questions by reading wiki files from a software engineering project.
+    return """You are a documentation and system assistant that answers questions about a software engineering project.
 
 Available tools:
-- list_files(path): List files and directories in a directory. Use this first to discover what wiki files are available.
-- read_file(path): Read the contents of a specific file. Use this to read wiki files and find answers.
+- list_files(path): List files and directories in a directory. Use this to discover what files exist.
+- read_file(path): Read the contents of a specific file. Use this to read wiki files, source code, or configuration files.
+- query_api(method, path, body): Call the live backend API to get current data or check system behavior.
+
+When to use each tool:
+- Use list_files/read_file for: documentation questions, implementation details, configuration, source code analysis
+- Use query_api for: current database state, HTTP status codes, API responses, live data, checking if the API is working
 
 Process:
-1. Use list_files to discover relevant wiki files (start with 'wiki' directory)
-2. Use read_file to read specific files that might contain the answer
-3. Find the answer in the file contents
-4. Return the answer with a source reference
+1. Identify what type of question is being asked
+2. For wiki/documentation: use list_files to discover files, then read_file to read them
+3. For source code: use read_file directly on backend files (e.g., backend/app/main.py)
+4. For live data or API behavior: use query_api with the appropriate endpoint
+5. Find the answer and return it with a source reference
 
 Important:
-- Always include the source field with format: wiki/filename.md#section-anchor
+- Always include the source field when reading files (format: path#section-anchor)
 - Section anchors are lowercase with hyphens instead of spaces (e.g., 'resolving-merge-conflicts')
+- For API queries, you can note the endpoint in the source field (e.g., 'GET /items/')
 - If you can't find an exact section, use just the file path
 - Be concise and accurate in your answers
-- Only use the tools available to you (read_file, list_files)"""
+- Only use the tools available to you (read_file, list_files, query_api)
+- The API requires authentication - you don't need to worry about it, just call query_api"""
 
 
 async def call_llm(
