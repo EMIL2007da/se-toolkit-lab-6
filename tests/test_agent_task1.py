@@ -11,7 +11,7 @@ def test_agent_returns_valid_json() -> None:
     agent_path = Path(__file__).parent.parent / "agent.py"
 
     result = subprocess.run(
-        [sys.executable, "-m", "uv", "run", str(agent_path), "What is 2+2?"],
+        ["uv", "run", str(agent_path), "What is 2+2?"],
         capture_output=True,
         text=True,
         timeout=60,
