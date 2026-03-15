@@ -587,7 +587,7 @@ def main() -> None:
             tool_name = function.get("name", "")
 
             try:
-                tool_args = json.loads(function.get("args", "{}"))
+                tool_args = json.loads(function.get("arguments", "{}"))
             except json.JSONDecodeError:
                 tool_args = {}
 
