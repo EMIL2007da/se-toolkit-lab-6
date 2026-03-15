@@ -26,9 +26,21 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 
 
 def load_env() -> dict[str, str]:
-    """Load environment variables from .env.agent.secret."""
+    """Load environment variables from env or .env.agent.secret."""
     env_vars: dict[str, str] = {}
 
+    # First, try to load from environment variables (for autochecker)
+    for key in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL", "LMS_API_KEY", "AGENT_API_BASE_URL"]:
+        val = os.environ.get(key)
+        if val:
+            env_vars[key] = val
+
+    # If we have all required vars from env, return them
+    if all(k in env_vars for k in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL"]):
+        print("Loaded LLM config from environment variables", file=sys.stderr)
+        return env_vars
+
+    # Otherwise, try to load from .env.agent.secret file
     # Try project root first
     env_file = PROJECT_ROOT / ".env.agent.secret"
 
@@ -42,7 +54,7 @@ def load_env() -> dict[str, str]:
         env_file = Path.home() / ".env.agent.secret"
 
     if not env_file.exists():
-        print(f"Error: {env_file} not found", file=sys.stderr)
+        print(f"Error: {env_file} not found and environment variables not set", file=sys.stderr)
         sys.exit(1)
 
     with open(env_file) as f:
@@ -52,8 +64,17 @@ def load_env() -> dict[str, str]:
                 continue
             if "=" in line:
                 key, value = line.split("=", 1)
-                env_vars[key.strip()] = value.strip()
+                # Env vars take precedence
+                if key not in env_vars:
+                    env_vars[key.strip()] = value.strip()
 
+    # Verify we have required vars
+    missing = [k for k in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL"] if k not in env_vars]
+    if missing:
+        print(f"Error: Missing required env vars: {missing}", file=sys.stderr)
+        sys.exit(1)
+
+    print("Loaded LLM config from .env.agent.secret file", file=sys.stderr)
     return env_vars
 
 
@@ -566,7 +587,7 @@ def main() -> None:
             tool_name = function.get("name", "")
 
             try:
-                tool_args = json.loads(function.get("args", "{}"))
+                tool_args = json.loads(function.get("arguments", "{}"))
             except json.JSONDecodeError:
                 tool_args = {}
 
