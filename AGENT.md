@@ -328,3 +328,60 @@ After iterative improvements, the agent passes all 10 local evaluation questions
 - Add more sophisticated source extraction (line numbers, function names)
 - Support for streaming responses for long-running queries
 - Multi-turn conversation support with context management
+
+## Task 3 Updates: System Agent
+
+### New Tool: `query_api`
+
+For Task 3, I added the `query_api` tool to enable the agent to query the live backend API. This allows answering questions about:
+- Current database state (e.g., "How many items are in the database?")
+- HTTP status codes (e.g., "What status code for unauthenticated requests?")
+- API error messages and bug diagnosis
+- Live system behavior
+
+### Authentication
+
+The `query_api` tool reads `LMS_API_KEY` from `.env.docker.secret` and includes it in the `X-API-Key` header for all requests. This ensures secure access to the backend endpoints.
+
+### Key Implementation Details
+
+1. **Environment Variable Loading**: Added `load_docker_env()` function to load backend configuration separately from LLM configuration.
+
+2. **Configurable API Base URL**: The `get_api_base_url()` function reads `AGENT_API_BASE_URL` from environment, defaulting to `http://localhost:42002`.
+
+3. **Tool Call History Fix**: Fixed a critical bug where tool results were being sent back to the LLM without first adding the assistant's message containing the tool_calls. This caused the Qwen API to return errors about invalid message structure.
+
+4. **System Prompt Enhancement**: Updated the system prompt to clearly distinguish when to use `query_api` vs `read_file`/`list_files`:
+   - Wiki/documentation questions → file tools
+   - Source code questions → `read_file`
+   - Live data/API questions → `query_api`
+   - Bug diagnosis → `query_api` first, then `read_file` to examine source
+
+### Lessons Learned
+
+1. **Tool Call Message Structure**: The OpenAI-compatible API requires a specific message sequence: user → assistant (with tool_calls) → tool (with tool_call_id). Missing the assistant message causes validation errors.
+
+2. **Environment Separation**: Keeping LLM credentials (`.env.agent.secret`) separate from backend credentials (`.env.docker.secret`) is important for security and flexibility. The autochecker injects different values at runtime.
+
+3. **System Prompt Matters**: The LLM's tool selection depends heavily on how the system prompt describes each tool. Being explicit about "when to use each tool" significantly improves accuracy.
+
+4. **Error Handling in Tools**: Returning structured JSON errors from `query_api` allows the LLM to reason about HTTP errors (401, 404, 500) rather than just seeing a generic failure.
+
+### Benchmark Performance
+
+The agent is designed to pass all 10 local evaluation questions:
+- Questions 0-1: Wiki lookups using `read_file`
+- Questions 2-3: Source code analysis using `read_file`/`list_files`
+- Questions 4-7: API queries using `query_api` (some combined with `read_file` for bug diagnosis)
+- Questions 8-9: Complex reasoning requiring multiple tool calls (LLM judge grading)
+
+### Final Architecture Summary
+
+The Task 3 agent is a complete agentic system with:
+- **3 tools**: `read_file`, `list_files`, `query_api`
+- **Dual environment config**: LLM settings + backend API settings
+- **Agentic loop**: Up to 10 tool call iterations for multi-step reasoning
+- **Structured output**: JSON with answer, source, and tool call log
+- **Security**: Path validation, API key authentication, timeout limits
+
+The agent can now answer questions that require querying live system state, diagnosing API errors, and explaining bugs by combining API responses with source code analysis.
