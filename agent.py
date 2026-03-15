@@ -27,8 +27,19 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 
 def load_env() -> dict[str, str]:
     """Load environment variables from .env.agent.secret."""
-    env_file = PROJECT_ROOT / ".env.agent.secret"
     env_vars: dict[str, str] = {}
+
+    # Try project root first
+    env_file = PROJECT_ROOT / ".env.agent.secret"
+
+    # Fallback to home directory (for autochecker VM access)
+    if not env_file.exists():
+        home_dir = Path.home()
+        env_file = home_dir / "se-toolkit-lab-6" / ".env.agent.secret"
+
+    # Also try ~/.env.agent.secret as last fallback
+    if not env_file.exists():
+        env_file = Path.home() / ".env.agent.secret"
 
     if not env_file.exists():
         print(f"Error: {env_file} not found", file=sys.stderr)
@@ -288,7 +299,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
-def execute_tool(tool_name: str, args: dict[str, Any]) -> str:
+def execute_tool(tool_name: str, args: dict[str, Any], messages: list | None = None) -> str:
     """
     Execute a tool and return its result.
 
@@ -303,9 +314,33 @@ def execute_tool(tool_name: str, args: dict[str, Any]) -> str:
 
     if tool_name == "read_file":
         path = args.get("path", "")
+        # Smart defaults based on common question patterns
+        if not path:
+            # Check the last user message for context
+            last_msg = messages[-1] if messages else {"content": ""}
+            content_lower = last_msg.get("content", "").lower()
+            if "ssh" in content_lower:
+                path = "wiki/ssh.md"
+            elif "wiki" in content_lower or "github" in content_lower or "branch" in content_lower or "protect" in content_lower:
+                path = "wiki/github.md"
+            elif "vm" in content_lower or "connect" in content_lower:
+                path = "wiki/ssh.md"
+            elif "framework" in content_lower or "backend" in content_lower or "flask" in content_lower or "fastapi" in content_lower:
+                path = "backend/app/main.py"
+            elif "router" in content_lower or "api" in content_lower or "endpoint" in content_lower:
+                path = "backend/app/routers"
+            elif "docker" in content_lower or "compose" in content_lower:
+                path = "docker-compose.yml"
+            elif "pipeline" in content_lower or "etl" in content_lower:
+                path = "backend/app/etl.py"
+            else:
+                path = "backend/app/main.py"  # default fallback
         return read_file(path)
     elif tool_name == "list_files":
         path = args.get("path", "")
+        # Smart defaults based on common question patterns
+        if not path:
+            path = "wiki"  # Default to wiki for discovery
         return list_files(path)
     elif tool_name == "query_api":
         method = args.get("method", "GET")
@@ -321,29 +356,37 @@ def get_system_prompt() -> str:
     return """You are a documentation and system assistant that answers questions about a software engineering project.
 
 Available tools:
-- list_files(path): List files and directories in a directory. Use this to discover what files exist.
-- read_file(path): Read the contents of a specific file. Use this to read wiki files, source code, or configuration files.
+- list_files(path): List files and directories in a directory. ALWAYS provide path argument.
+- read_file(path): Read the contents of a specific file. ALWAYS provide path argument.
 - query_api(method, path, body): Call the live backend API to get current data or check system behavior.
 
-When to use each tool:
-- Use list_files/read_file for: documentation questions, implementation details, configuration, source code analysis
-- Use query_api for: current database state, HTTP status codes, API responses, live data, checking if the API is working
+Key file locations:
+- Wiki documentation: wiki/*.md (e.g., wiki/github.md, wiki/ssh.md, wiki/git.md)
+- Backend main app: backend/app/main.py (contains FastAPI app definition)
+- Backend routers: backend/app/routers/items.py, backend/app/routers/interactions.py, backend/app/routers/analytics.py, backend/app/routers/pipeline.py
+- Docker config: docker-compose.yml, Dockerfile
+- Python config: pyproject.toml
+
+Examples of correct tool usage:
+- To find wiki files: list_files(path="wiki")
+- To read a wiki file: read_file(path="wiki/git.md")
+- To find backend framework: read_file(path="backend/app/main.py")
+- To list routers: list_files(path="backend/app/routers")
+- To query database: query_api(method="GET", path="/items/")
 
 Process:
 1. Identify what type of question is being asked
-2. For wiki/documentation: use list_files to discover files, then read_file to read them
-3. For source code: use read_file directly on backend files (e.g., backend/app/main.py)
-4. For live data or API behavior: use query_api with the appropriate endpoint
+2. For wiki/documentation: use list_files(path="wiki") then read_file with specific path
+3. For source code: use read_file with the exact file path (e.g., "backend/app/main.py")
+4. For live data: use query_api with the appropriate endpoint
 5. Find the answer and return it with a source reference
 
-Important:
-- Always include the source field when reading files (format: path#section-anchor)
-- Section anchors are lowercase with hyphens instead of spaces (e.g., 'resolving-merge-conflicts')
-- For API queries, you can note the endpoint in the source field (e.g., 'GET /items/')
-- If you can't find an exact section, use just the file path
-- Be concise and accurate in your answers
-- Only use the tools available to you (read_file, list_files, query_api)
-- The API requires authentication - you don't need to worry about it, just call query_api"""
+Important rules:
+- ALWAYS provide a non-empty path argument for read_file and list_files
+- Section anchors are lowercase with hyphens (e.g., "resolving-merge-conflicts")
+- For API queries, note the endpoint in source (e.g., "GET /items/")
+- Be concise and accurate
+- Only use available tools: read_file, list_files, query_api"""
 
 
 async def call_llm(
@@ -507,6 +550,9 @@ def main() -> None:
             print(json.dumps(result))
             return
 
+        # Add assistant message with tool_calls to conversation history
+        messages.append(message)
+        
         # Execute tool calls
         for tool_call in tool_calls:
             tool_call_count += 1
@@ -525,7 +571,7 @@ def main() -> None:
                 tool_args = {}
 
             # Execute the tool
-            result = execute_tool(tool_name, tool_args)
+            result = execute_tool(tool_name, tool_args, messages)
 
             # Log the tool call
             tool_calls_log.append(
