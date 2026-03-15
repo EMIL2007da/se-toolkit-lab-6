@@ -37,6 +37,7 @@ def load_env() -> dict[str, str]:
 
     # If we have all required vars from env, return them
     if all(k in env_vars for k in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL"]):
+        print("Loaded LLM config from environment variables", file=sys.stderr)
         return env_vars
 
     # Otherwise, try to load from .env.agent.secret file
@@ -53,7 +54,7 @@ def load_env() -> dict[str, str]:
         env_file = Path.home() / ".env.agent.secret"
 
     if not env_file.exists():
-        print(f"Error: {env_file} not found", file=sys.stderr)
+        print(f"Error: {env_file} not found and environment variables not set", file=sys.stderr)
         sys.exit(1)
 
     with open(env_file) as f:
@@ -67,6 +68,13 @@ def load_env() -> dict[str, str]:
                 if key not in env_vars:
                     env_vars[key.strip()] = value.strip()
 
+    # Verify we have required vars
+    missing = [k for k in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL"] if k not in env_vars]
+    if missing:
+        print(f"Error: Missing required env vars: {missing}", file=sys.stderr)
+        sys.exit(1)
+
+    print("Loaded LLM config from .env.agent.secret file", file=sys.stderr)
     return env_vars
 
 
