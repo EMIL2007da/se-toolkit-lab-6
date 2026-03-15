@@ -390,12 +390,26 @@ Process:
 4. For live data: use query_api with the appropriate endpoint
 5. Find the answer and return it with a source reference
 
+<<<<<<< HEAD
 Important rules:
 - ALWAYS provide a non-empty path argument for read_file and list_files
 - Section anchors are lowercase with hyphens (e.g., "resolving-merge-conflicts")
 - For API queries, note the endpoint in source (e.g., "GET /items/")
 - Be concise and accurate
 - Only use available tools: read_file, list_files, query_api"""
+=======
+Important:
+- Always include the source field when reading files (format: path#section-anchor)
+- Section anchors are lowercase with hyphens instead of spaces (e.g., 'resolving-merge-conflicts')
+- For API queries, you can note the endpoint in the source field (e.g., 'GET /items/')
+- If you can't find an exact section, use just the file path
+- Be concise and accurate in your answers
+- Only use the tools available to you (read_file, list_files, query_api)
+- The API requires authentication - you don't need to worry about it, just call query_api
+- After using list_files to find relevant files, immediately use read_file to read their contents
+- Do not call list_files multiple times on the same or similar paths - use the results you already have
+- Once you have gathered enough information, provide a complete final answer directly"""
+>>>>>>> c996b78 (fix: improve agent tool calling and system prompt for better Qwen API compatibility)
 
 
 async def call_llm(
@@ -559,9 +573,22 @@ def main() -> None:
             print(json.dumps(result))
             return
 
+<<<<<<< HEAD
         # Add assistant message with tool_calls to conversation history
         messages.append(message)
         
+=======
+        # IMPORTANT: Add the assistant message with tool_calls to messages first
+        # This is required by Qwen API - tool messages must follow assistant messages with tool_calls
+        messages.append(
+            {
+                "role": "assistant",
+                "content": message.get("content"),
+                "tool_calls": tool_calls,
+            }
+        )
+
+>>>>>>> c996b78 (fix: improve agent tool calling and system prompt for better Qwen API compatibility)
         # Execute tool calls
         for tool_call in tool_calls:
             tool_call_count += 1
