@@ -20,7 +20,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path from project root."}
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path from project root.",
+                    }
                 },
                 "required": ["path"],
             },
@@ -34,7 +37,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative directory path from project root."}
+                    "path": {
+                        "type": "string",
+                        "description": "Relative directory path from project root.",
+                    }
                 },
                 "required": ["path"],
             },
@@ -48,10 +54,22 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "method": {"type": "string", "description": "HTTP method: GET, POST, etc."},
-                    "path": {"type": "string", "description": "API path with query params if needed, e.g. /items/ or /analytics/completion-rate?lab=lab-99"},
-                    "body": {"type": "string", "description": "Optional JSON request body."},
-                    "auth": {"type": "boolean", "description": "Include auth header. Default true. Set false to test unauthenticated access."},
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method: GET, POST, etc.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "API path with query params if needed, e.g. /items/ or /analytics/completion-rate?lab=lab-99",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional JSON request body.",
+                    },
+                    "auth": {
+                        "type": "boolean",
+                        "description": "Include auth header. Default true. Set false to test unauthenticated access.",
+                    },
                 },
                 "required": ["method", "path"],
             },
@@ -129,7 +147,9 @@ def execute_tool(name, args):
     elif name == "list_files":
         return list_files(args["path"])
     elif name == "query_api":
-        return query_api(args["method"], args["path"], args.get("body"), args.get("auth", True))
+        return query_api(
+            args["method"], args["path"], args.get("body"), args.get("auth", True)
+        )
     return "Unknown tool"
 
 
@@ -165,20 +185,33 @@ def main():
         msg = response.choices[0].message
 
         if msg.tool_calls:
-            messages.append({
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                    for tc in msg.tool_calls
-                ],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                }
+            )
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
                 result = execute_tool(tc.function.name, args)
                 print(f"Tool: {tc.function.name} {args}", file=sys.stderr)
-                all_tool_calls.append({"tool": tc.function.name, "args": args, "result": result})
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                all_tool_calls.append(
+                    {"tool": tc.function.name, "args": args, "result": result}
+                )
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": result}
+                )
         else:
             answer_text = (msg.content or "").strip()
             if "SOURCE:" in answer_text:
