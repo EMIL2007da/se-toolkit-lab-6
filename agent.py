@@ -26,21 +26,9 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 
 
 def load_env() -> dict[str, str]:
-    """Load environment variables from env or .env.agent.secret."""
+    """Load environment variables from .env.agent.secret."""
     env_vars: dict[str, str] = {}
 
-    # First, try to load from environment variables (for autochecker)
-    for key in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL", "LMS_API_KEY", "AGENT_API_BASE_URL"]:
-        val = os.environ.get(key)
-        if val:
-            env_vars[key] = val
-
-    # If we have all required vars from env, return them
-    if all(k in env_vars for k in ["LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL"]):
-        print("Loaded LLM config from environment variables", file=sys.stderr)
-        return env_vars
-
-    # Otherwise, try to load from .env.agent.secret file
     # Try project root first
     env_file = PROJECT_ROOT / ".env.agent.secret"
 
